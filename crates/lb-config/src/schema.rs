@@ -125,6 +125,7 @@ impl KeyMap {
             ("ctrl-p",         "file_picker"),
             ("ctrl-shift-p",   "command_palette"),
             ("ctrl-s",         "save"),
+            ("f5",             "reload"),
             ("ctrl-z",         "undo"),
             ("ctrl-y",         "redo"),
             ("ctrl-f",         "search"),

@@ -37,8 +37,8 @@ impl StatusLine {
     /// Shortcut cheat-sheet for the bottom row, depending on the mode.
     pub fn hint_text(&self) -> &'static str {
         match self.mode {
-            "INSERT" => " Esc normal mode  |  ^S save  ^Z undo  ^Y redo  |  Ctrl-Q quit  F10 force-quit",
-            _ => " i/a/o insert  hjkl move  w/b word  0/$ line  x del  u undo  ^R redo  |  ^S save  q quit",
+            "INSERT" => " Esc normal mode  |  ^S save  F5 reload  ^Z undo  |  Ctrl-Q quit  F1 menu",
+            _ => " i/a/o insert  hjkl move  w/b word  0/$ line  x del  u undo  ^R redo  |  ^S save  F5 reload  q quit  Ctrl-Space/F1 menu",
         }
     }
 

@@ -32,6 +32,7 @@ pub enum Command {
 
     // ── File I/O ───────────────────────────────────────────────────────────
     Save,
+    Reload,
     OpenFile(String),
 
     // ── Session ────────────────────────────────────────────────────────────
@@ -86,6 +87,7 @@ pub fn from_name(name: &str) -> Option<Command> {
         "undo"                => Some(Command::Undo),
         "redo"                => Some(Command::Redo),
         "save"                => Some(Command::Save),
+        "reload"              => Some(Command::Reload),
         "quit"                => Some(Command::Quit),
         "force_quit"          => Some(Command::ForceQuit),
         "hover"               => Some(Command::Hover),

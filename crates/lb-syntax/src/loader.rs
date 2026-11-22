@@ -98,6 +98,11 @@ impl GrammarLoader {
         Ok(language_clone)
     }
 
+    /// Drop the cached library for `lang` so the next `load` reads the file again.
+    pub fn forget(&mut self, lang: &str) {
+        self.cache.remove(lang);
+    }
+
     /// Return the grammar directory path.
     pub fn grammar_dir(&self) -> &Path {
         &self.grammar_dir
@@ -106,7 +111,7 @@ impl GrammarLoader {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-fn lib_filename(lang: &str) -> String {
+pub fn lib_filename(lang: &str) -> String {
     #[cfg(target_os = "windows")]
     { format!("{lang}.dll") }
     #[cfg(target_os = "macos")]

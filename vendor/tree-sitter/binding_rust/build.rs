@@ -41,6 +41,9 @@ fn main() {
         .include(&src_path)
         .include(&wasm_path)
         .include(&include_path)
+        .define("_POSIX_C_SOURCE", "200112L")
+        .define("_DEFAULT_SOURCE", None)
+        .define("_DARWIN_C_SOURCE", None)
         .warnings(false)
         .file(src_path.join("lib.c"))
         .compile("tree-sitter");
@@ -50,6 +53,33 @@ fn main() {
 
 #[cfg(feature = "bindgen")]
 fn generate_bindings(out_dir: &std::path::Path) {
+    use std::{process::Command, str::FromStr};
+
+    use bindgen::RustTarget;
+
+    let output = Command::new("cargo")
+        .args(["metadata", "--format-version", "1"])
+        .output()
+        .unwrap();
+
+    let metadata = serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap();
+
+    let Some(rust_version) = metadata
+        .get("packages")
+        .and_then(|packages| packages.as_array())
+        .and_then(|packages| {
+            packages.iter().find_map(|package| {
+                if package["name"] == "tree-sitter" {
+                    package.get("rust_version").and_then(|v| v.as_str())
+                } else {
+                    None
+                }
+            })
+        })
+    else {
+        panic!("Failed to find tree-sitter package in cargo metadata");
+    };
+
     const HEADER_PATH: &str = "include/tree_sitter/api.h";
 
     println!("cargo:rerun-if-changed={HEADER_PATH}");
@@ -77,11 +107,16 @@ fn generate_bindings(out_dir: &std::path::Path) {
         .no_copy(no_copy.join("|"))
         .prepend_enum_name(false)
         .use_core()
+        .clang_arg("-D TREE_SITTER_FEATURE_WASM")
+        .rust_target(RustTarget::from_str(rust_version).unwrap())
         .generate()
         .expect("Failed to generate bindings");
 
     let bindings_rs = out_dir.join("bindings.rs");
-    bindings
-        .write_to_file(&bindings_rs)
-        .unwrap_or_else(|_| panic!("Failed to write bindings into path: {bindings_rs:?}"));
+    bindings.write_to_file(&bindings_rs).unwrap_or_else(|_| {
+        panic!(
+            "Failed to write bindings into path: {}",
+            bindings_rs.display()
+        )
+    });
 }

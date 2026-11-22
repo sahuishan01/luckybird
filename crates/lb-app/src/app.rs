@@ -11,7 +11,7 @@ use lb_core::{
 use lb_lsp::ServerEvent;
 use lb_lspmgr::LspManager;
 use lb_plugin::PluginRuntime;
-use lb_syntax::{HighlightSpan, SyntaxManager};
+use lb_syntax::{SyntaxLayer, SyntaxManager};
 use lb_tui::{
     render::{DiagnosticSeverity as TuiSev, Highlight as TuiHighlight, View},
     EditorEvent, KeyCode, KeyEvent2, StatusLine, Tui,
@@ -20,6 +20,10 @@ use lsp_types::DiagnosticSeverity as LspSev;
 use tracing::{debug, warn};
 
 use crate::commands::{from_name, Command};
+use crate::installer::Installer;
+use crate::overlay::{InputKind, MenuAction, Outcome, Overlay, PickKind};
+use crate::paths::expand_path;
+use crate::theme;
 
 // ─── Open buffer ─────────────────────────────────────────────────────────────
 
@@ -30,7 +34,11 @@ pub struct OpenBuffer {
     pub path: Option<PathBuf>,
     pub dirty: bool,
     pub language: Option<String>,
-    pub syntax_spans: Vec<HighlightSpan>,
+    pub syntax_spans: Vec<TuiHighlight>,
+    /// Highlighter for this buffer's language, if its grammar is installed.
+    pub layer: Option<SyntaxLayer>,
+    /// `lsp_version` the spans were computed for.
+    pub highlighted_version: i32,
     pub lsp_version: i32,
     pub scroll_offset: usize,
 }
@@ -45,6 +53,8 @@ impl OpenBuffer {
             dirty: false,
             language: None,
             syntax_spans: vec![],
+            layer: None,
+            highlighted_version: -1,
             lsp_version: 0,
             scroll_offset: 0,
         }
@@ -59,6 +69,8 @@ impl OpenBuffer {
             dirty: false,
             language,
             syntax_spans: vec![],
+            layer: None,
+            highlighted_version: -1,
             lsp_version: 1,
             scroll_offset: 0,
         }
@@ -133,6 +145,9 @@ pub struct App {
     pub quit_armed: bool,
     /// Current modal editing state.
     pub mode: Mode,
+    /// Open actions overlay, if any.
+    pub overlay: Option<Overlay>,
+    installer: Installer,
 }
 
 impl App {
@@ -144,6 +159,7 @@ impl App {
         syntax: SyntaxManager,
         lsp: LspManager,
         plugins: PluginRuntime,
+        installer: Installer,
     ) -> Self {
         let buffers = vec![OpenBuffer::empty()];
         Self {
@@ -159,6 +175,8 @@ impl App {
             diagnostics: HashMap::new(),
             quit_armed: false,
             mode: Mode::Normal,
+            overlay: None,
+            installer,
         }
     }
 
@@ -181,13 +199,7 @@ impl App {
         );
         debug!(path = %path.display(), ?language, "opened file");
 
-        // Update syntax spans if grammar is available.
-        let mut spans = Vec::new();
-        if let Some(ref lang) = language {
-            let layer = self.syntax.layer_for(lang);
-            let mut layer = layer;
-            spans = layer.highlight(&text);
-        }
+        let (layer, spans) = self.start_highlighting(language.as_deref(), &text);
 
         // If the first buffer is the empty scratch buffer, replace it.
         if self.buffers.len() == 1
@@ -196,13 +208,92 @@ impl App {
         {
             let mut buf = OpenBuffer::from_file(path.clone(), text, language);
             buf.syntax_spans = spans;
+            buf.layer = layer;
+            buf.highlighted_version = buf.lsp_version;
             self.buffers[0] = buf;
         } else {
             let mut buf = OpenBuffer::from_file(path.clone(), text, language);
             buf.syntax_spans = spans;
+            buf.layer = layer;
+            buf.highlighted_version = buf.lsp_version;
             self.buffers.push(buf);
             self.active = self.buffers.len() - 1;
         }
+        Ok(())
+    }
+
+    /// Build the highlighter for `language` and colour `text` with it.
+    fn start_highlighting(
+        &mut self,
+        language: Option<&str>,
+        text: &str,
+    ) -> (Option<SyntaxLayer>, Vec<TuiHighlight>) {
+        let Some(language) = language else {
+            return (None, Vec::new());
+        };
+        let mut layer = self.syntax.layer_for(language);
+        let spans = color_spans(&mut layer, text);
+        (Some(layer), spans)
+    }
+
+    /// Re-run the highlighter if the active buffer changed since the last pass.
+    fn refresh_highlighting(&mut self) {
+        let buf = &mut self.buffers[self.active];
+        if buf.highlighted_version == buf.lsp_version {
+            return;
+        }
+        buf.highlighted_version = buf.lsp_version;
+        if let Some(layer) = buf.layer.as_mut() {
+            let text = buf.buffer.to_string();
+            buf.syntax_spans = color_spans(layer, &text);
+        }
+    }
+
+    /// Re-read the active file from disk and re-run syntax highlighting.
+    ///
+    /// With unsaved edits the buffer is kept and only the highlighting is
+    /// refreshed, so a freshly installed grammar can be picked up safely.
+    pub fn reload_active(&mut self) -> anyhow::Result<()> {
+        let Some(path) = self.buffers[self.active].path.clone() else {
+            self.status_msg = Some("Nothing to reload: this buffer has no file".to_string());
+            return Ok(());
+        };
+        let dirty = self.buffers[self.active].dirty;
+        let text = if dirty {
+            self.buffers[self.active].buffer.to_string()
+        } else {
+            match std::fs::read_to_string(&path) {
+                Ok(text) => text,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+                Err(e) => return Err(e).with_context(|| format!("reading {}", path.display())),
+            }
+        };
+        let language = self.syntax.detect(path.to_str().unwrap_or(""), text.lines().next());
+        if let Some(lang) = &language {
+            self.syntax.forget_grammar(lang);
+        }
+        let (layer, spans) = self.start_highlighting(language.as_deref(), &text);
+        let highlighted = !spans.is_empty();
+
+        let buf = &mut self.buffers[self.active];
+        if !dirty {
+            let cursor = buf.selection.cursor().min(text.len());
+            let cursor = (0..=cursor).rev().find(|i| text.is_char_boundary(*i)).unwrap_or(0);
+            buf.buffer = Buffer::from_str(&text);
+            buf.selection = Selection::point(cursor);
+            buf.undo = UndoTree::new();
+            buf.lsp_version += 1;
+        }
+        buf.language = language;
+        buf.syntax_spans = spans;
+        buf.layer = layer;
+        buf.highlighted_version = buf.lsp_version;
+        self.status_msg = Some(match (dirty, highlighted) {
+            (true, true) => "Refreshed highlighting (unsaved edits kept)".to_string(),
+            (true, false) => "Reloaded; no highlighting available for this file".to_string(),
+            (false, true) => format!("Reloaded {}", path.display()),
+            (false, false) => format!("Reloaded {} (no highlighting available)", path.display()),
+        });
         Ok(())
     }
 
@@ -211,7 +302,7 @@ impl App {
         let path = match &buf.path {
             Some(p) => p.clone(),
             None => {
-                self.status_msg = Some("No file name — restart with: luckybird <file>".to_string());
+                self.status_msg = Some("No file name — open the menu (Space / F1) and choose Save as".to_string());
                 return Ok(());
             }
         };
@@ -221,6 +312,86 @@ impl App {
         buf.dirty = false;
         self.status_msg = Some(format!("Saved {}", path.display()));
         Ok(())
+    }
+
+    /// Write the active buffer to `path` and make that its file name.
+    fn save_as(&mut self, path: PathBuf) -> anyhow::Result<()> {
+        let language = self.syntax.detect(path.to_str().unwrap_or(""), None);
+        let buf = &mut self.buffers[self.active];
+        std::fs::write(&path, buf.buffer.to_string().as_bytes())
+            .with_context(|| format!("writing {}", path.display()))?;
+        buf.path = Some(path.clone());
+        buf.language = language;
+        buf.dirty = false;
+        self.status_msg = Some(format!("Saved {}", path.display()));
+        Ok(())
+    }
+
+    // ── Actions overlay ───────────────────────────────────────────────────
+
+    fn handle_overlay_key(&mut self, key: &KeyEvent2) -> anyhow::Result<bool> {
+        let outcome = match self.overlay.as_mut() {
+            Some(overlay) => overlay.handle_key(key),
+            None => return Ok(false),
+        };
+        match outcome {
+            Outcome::Stay => {}
+            Outcome::Close => self.overlay = None,
+            Outcome::Action(action) => {
+                self.overlay = None;
+                return self.run_menu_action(action);
+            }
+            Outcome::Picked(kind, lang) => {
+                self.overlay = None;
+                let langs = vec![lang];
+                match kind {
+                    PickKind::Grammar => {
+                        self.status_msg = Some(format!("Installing syntax highlighting: {}...", langs[0]));
+                        self.installer.install_grammars(langs);
+                    }
+                    PickKind::Server => {
+                        self.status_msg = Some(format!("Installing language server: {}...", langs[0]));
+                        self.installer.install_servers(langs);
+                    }
+                }
+            }
+            Outcome::Submitted(kind, text) => {
+                self.overlay = None;
+                let path = expand_path(&text);
+                match kind {
+                    InputKind::SaveAs => self.save_as(path)?,
+                    InputKind::Open => self.open_file(path)?,
+                }
+            }
+        }
+        Ok(false)
+    }
+
+    fn run_menu_action(&mut self, action: MenuAction) -> anyhow::Result<bool> {
+        match action {
+            MenuAction::Save => self.save_active()?,
+            MenuAction::SaveAs => {
+                let initial = self.buffers[self.active]
+                    .path
+                    .as_ref()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_default();
+                self.overlay = Some(Overlay::input(InputKind::SaveAs, initial));
+            }
+            MenuAction::Open => self.overlay = Some(Overlay::input(InputKind::Open, String::new())),
+            MenuAction::Reload => self.reload_active()?,
+            MenuAction::InstallGrammar => {
+                let langs = lb_syntax::registry::load().into_keys().collect();
+                self.overlay = Some(Overlay::pick(PickKind::Grammar, langs));
+            }
+            MenuAction::InstallServer => {
+                let langs = lb_syntax::registry::load().into_keys().collect();
+                self.overlay = Some(Overlay::pick(PickKind::Server, langs));
+            }
+            MenuAction::Quit => return self.execute(Command::Quit),
+            MenuAction::ForceQuit => return self.execute(Command::ForceQuit),
+        }
+        Ok(false)
     }
 
     // ── Editing ───────────────────────────────────────────────────────────
@@ -298,6 +469,7 @@ impl App {
             let _ = buf.buffer.revert(change);
             buf.selection = Selection::point(change.start);
             buf.dirty = true;
+            buf.lsp_version += 1;
         }
         Ok(())
     }
@@ -309,6 +481,7 @@ impl App {
             let _ = buf.buffer.apply(&edit);
             buf.selection = Selection::point(change.start + change.new_text.len());
             buf.dirty = true;
+            buf.lsp_version += 1;
         }
         Ok(())
     }
@@ -367,6 +540,15 @@ impl App {
     }
 
     fn handle_key(&mut self, key: KeyEvent2) -> anyhow::Result<bool> {
+        if self.overlay.is_some() {
+            return self.handle_overlay_key(&key);
+        }
+        let plain_f1 = matches!(key.code, KeyCode::F(1)) && !key.modifiers.ctrl && !key.modifiers.alt;
+        if plain_f1 || crate::overlay::is_ctrl_space(&key) {
+            self.status_msg = None;
+            self.overlay = Some(Overlay::menu());
+            return Ok(false);
+        }
         let chord = key_to_chord_str(&key);
         let mode_chord = format!("{}:{}", self.mode.prefix(), chord);
         tracing::info!(?key, mode = ?self.mode, chord = %chord, "key event");
@@ -519,6 +701,7 @@ impl App {
             Command::Undo => self.undo()?,
             Command::Redo => self.redo()?,
             Command::Save => self.save_active()?,
+            Command::Reload => self.reload_active()?,
             Command::Quit => {
                 if self.has_dirty_buffers() && !self.quit_armed {
                     self.quit_armed = true;
@@ -632,6 +815,7 @@ impl App {
     // ── Rendering ─────────────────────────────────────────────────────────
 
     pub fn render(&mut self) -> anyhow::Result<()> {
+        self.refresh_highlighting();
         let active = self.active;
 
         // Collect owned render data to avoid conflicting borrows.
@@ -663,12 +847,9 @@ impl App {
             mode: self.mode.label(),
         };
 
-        // Convert syntax spans to lb-tui Highlight type.
-        let highlights: Vec<TuiHighlight> = syntax_spans
-            .iter()
-            .map(|s| TuiHighlight { start: s.start, end: s.end, capture: s.capture })
-            .collect();
+        let highlights = syntax_spans;
 
+        let overlay_model = self.overlay.as_ref().map(Overlay::model);
         let view = View {
             buffer: &buffer,
             selection: &selection,
@@ -676,6 +857,7 @@ impl App {
             diagnostics: &[],
             status,
             scroll_offset,
+            overlay: overlay_model.as_ref(),
         };
 
         self.tui.render(&view)?;
@@ -787,4 +969,27 @@ mod tests {
         let key = KeyEvent2 { code: KC::Char('a'), modifiers: mods_none() };
         assert_eq!(key_to_chord_str(&key), "a");
     }
+}
+
+/// Highlight `text` and keep only the spans that have a colour in the theme.
+pub(crate) fn color_spans(layer: &mut SyntaxLayer, text: &str) -> Vec<TuiHighlight> {
+    let spans = layer.highlight(text);
+    let named = |s: &lb_syntax::HighlightSpan| {
+        let kind = layer.capture_name(s.capture).and_then(theme::name_kind)?;
+        Some((kind, text.get(s.start..s.end)?))
+    };
+
+    // Every distinct function / type / variable name gets its own colour.
+    let name_colors = theme::assign_name_colors(spans.iter().filter_map(named));
+
+    spans
+        .iter()
+        .filter_map(|s| {
+            let rgb = match named(s).and_then(|key| name_colors.get(&key)) {
+                Some(rgb) => *rgb,
+                None => layer.capture_name(s.capture).and_then(theme::color_for)?,
+            };
+            Some(TuiHighlight { start: s.start, end: s.end, rgb })
+        })
+        .collect()
 }

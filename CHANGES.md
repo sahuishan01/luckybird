@@ -421,3 +421,238 @@ User asked for Rust plugins instead of Lua to shrink the binary; Lua and `mlua` 
 
 ### Follow-ups
 - No plugin exists yet; add handlers with editor access when the first one needs it.
+
+---
+
+## LB-0016 — Add actions overlay with Save As and language installers
+
+- **Date**: 2026-11-22
+- **Crate(s)**: lb-app, lb-tui, lb-syntax
+- **Agent**: Claude
+
+### What changed
+- `lb-app`: `Space` (Normal) / `F1` (any mode) opens an actions overlay (`overlay.rs`, rendered by `lb-tui/overlay.rs`): Save, Save as, Open, Install syntax highlighting, Install language server, Quit. Keys: `j`/`k`, Enter, digits, Esc. No `:` command line.
+- `installer.rs` + `compile.rs`: grammars are built from source without the tree-sitter CLI (`git clone`, then `cl`/`gcc`/`clang` compile `src/parser.c` and the scanner into a shared library, found via PATH or vswhere/vcvars64.bat on Windows; `highlights.scm` copied); servers use `rustup`/`npm`/`go`/`cargo`. Languages are validated against the grammar registry and command lines come from fixed tables. Runs on a background thread; progress reaches the status line through a channel selected in the event loop.
+- `lb-tui`: Hint row mentions Space/F1; new `overlay` module draws the card. `lb-syntax`: `loader::lib_filename` is now public.
+
+### Why
+User wanted an in-editor way to install tree-sitter grammars and language servers, and Save As.
+
+### Budget impact
+- Binary delta: +111 KB (948,224 -> 1,059,328 bytes)
+- Startup delta: not measured
+- RSS delta: not measured
+- New deps: none
+
+### Follow-ups
+- Installs were not executed end to end (they download and build); open the menu and pick Install syntax highlighting.
+- Re-highlighting open buffers after an install is not automatic.
+
+---
+
+## LB-0017 — Add reload command (F5)
+
+- **Date**: 2026-11-22
+- **Crate(s)**: lb-app, lb-config, lb-tui
+- **Agent**: Claude
+- **Parent**: LB-0016
+
+### What changed
+- New `reload` command bound to `F5` and listed in the actions menu (File > Reload file). A clean buffer is re-read from disk; a buffer with unsaved edits keeps its text and only re-runs syntax highlighting.
+- Hint row mentions `F5 reload`.
+
+### Why
+A grammar installed from the menu is only picked up when the file is reopened.
+
+### Budget impact
+- Binary delta: ~+8 KB (1,059,328 -> 1,067,008 bytes, includes the C-compile installer change)
+- Startup delta: no change
+- RSS delta: no change
+- New deps: none
+
+### Follow-ups
+- Auto-reload highlighting when a grammar install finishes.
+
+---
+
+## LB-0018 — Upgrade vendored tree-sitter to 0.25.10; log installer activity
+
+- **Date**: 2026-11-22
+- **Crate(s)**: workspace, lb-app
+- **Agent**: Claude
+- **Supersedes**: LB-0014 (the vendored tree-sitter version only)
+
+### What changed
+- `vendor/tree-sitter` is now 0.25.10 (still `regex` swapped for `regex-lite`) and the workspace pins `tree-sitter = "=0.25.10"`.
+- The installer logs progress, every command it runs, and full stdout/stderr of failed commands to `luckybird.log` (`%LOCALAPPDATA%\luckybird\`).
+- The ignored installer test now also checks that the Python grammar produces highlights.
+
+### Why
+Grammars built from current repos use ABI 15; tree-sitter 0.24 only accepts ABI 13-14 ("Incompatible language version 15"), so highlighting stayed off after a successful install.
+
+### Budget impact
+- Binary delta: +21 KB (1,068,544 -> 1,089,536 bytes)
+- Startup delta: not measured
+- RSS delta: not measured
+- New deps: none
+
+### Follow-ups
+- Re-apply the regex-lite patch when upgrading tree-sitter again.
+
+---
+
+## LB-0019 — Install grammars while the old one is loaded
+
+- **Date**: 2026-11-22
+- **Crate(s)**: lb-app, lb-syntax
+- **Agent**: Claude
+- **Parent**: LB-0018
+
+### What changed
+- The grammar is compiled in a temp folder and swapped into place; if the old library is loaded (Windows `LNK1104`), it is renamed to `<lang>.old` first. `.lib`/`.exp` files no longer land in the grammars folder.
+- `SyntaxManager::forget_grammar` / `GrammarLoader::forget` drop the cached library; F5 calls it so a reinstalled grammar is picked up without restarting.
+- The ignored installer test reinstalls Python while it is loaded.
+
+### Why
+Log showed `LINK : fatal error LNK1104: cannot open file ...\python.dll` when reinstalling while the editor had the DLL loaded.
+
+### Budget impact
+- Binary delta: negligible
+- Startup delta: no change
+- RSS delta: no change
+- New deps: none
+
+### Follow-ups
+- Delete stale `*.old` grammar files on startup.
+
+---
+
+## LB-0020 — Draw syntax highlighting colours
+
+- **Date**: 2026-11-22
+- **Crate(s)**: lb-tui, lb-syntax, lb-app
+- **Agent**: Claude
+- **Parent**: LB-0018
+
+### What changed
+- `lb-tui`: `Highlight` is now `{start, end, rgb}`; `render_text` draws spans as foreground colours (selection and cursor-line backgrounds are kept).
+- `lb-syntax`: `Highlighter::highlight` flattens nested captures into sorted, non-overlapping spans (innermost wins; later capture wins on equal ranges); `SyntaxLayer::capture_name` added.
+- `lb-app`: each buffer keeps its highlighter and re-highlights whenever its text changes (undo/redo now bump `lsp_version` too). New `theme.rs` maps capture names to colours (keyword, string, comment, function, type, number/constant, property, escape/operator, builtin variables); spans without a colour are dropped when highlighting.
+
+### Why
+The grammar loaded and produced spans, but the renderer never used them (placeholder since LB-0005), so nothing was ever coloured.
+
+### Budget impact
+- Binary delta: not measured (small)
+- Startup delta: no change
+- RSS delta: no change
+- New deps: none
+
+### Follow-ups
+- Theme is hard-coded; make it configurable.
+- Highlighting re-parses the whole buffer after every edit (fine for normal files; make it incremental for very large ones).
+
+---
+
+## LB-0021 — Resolve overlapping captures by query pattern order
+
+- **Date**: 2026-11-22
+- **Crate(s)**: lb-syntax
+- **Agent**: Claude
+- **Parent**: LB-0020
+
+### What changed
+- Highlight captures carry their query pattern index; for identical ranges the later pattern wins when overlaps are flattened.
+- The ignored real-grammar test checks that Python function definition and call names resolve to `function`.
+
+### Why
+tree-sitter returns matches ordered by position, not pattern, so the catch-all `(identifier) @variable` could beat `@function` and function names stayed uncoloured.
+
+### Budget impact
+- Binary delta: negligible
+- Startup delta: no change
+- RSS delta: no change
+- New deps: none
+
+### Follow-ups
+- none
+
+---
+
+## LB-0022 — Give each function name its own colour
+
+- **Date**: 2026-11-22
+- **Crate(s)**: lb-app
+- **Agent**: Claude
+- **Parent**: LB-0020
+
+### What changed
+- `theme.rs`: `is_function_name` and `assign_name_colors` pick one of 12 palette colours per distinct function/method name (hash slot with forward probing, so up to 12 names never share a colour and the result does not depend on order). Purple, green and grey are excluded because keywords, strings and comments use them.
+- `app.rs`: `color_spans` colours `function*`/`method*` captures (except builtin/macro) by name; a definition and its calls share a colour.
+
+### Why
+All function names were one blue, so `foo` and `foo2` could not be told apart at a glance.
+
+### Budget impact
+- Binary delta: negligible
+- Startup delta: no change
+- RSS delta: no change
+- New deps: none
+
+### Follow-ups
+- Beyond 12 distinct functions colours repeat; the palette could grow or variables could get the same treatment.
+
+---
+
+## LB-0023 — Per-name colours for functions, types and variables in every language
+
+- **Date**: 2026-11-22
+- **Crate(s)**: lb-app, lb-syntax
+- **Agent**: Claude
+- **Parent**: LB-0022
+- **Supersedes**: LB-0022 (function-only colouring)
+
+### What changed
+- `theme.rs`: names are classified as Function, Type or Variable from the capture name (`function*`/`method*`, `type`/`class`/`namespace`/`module`/`constructor`/..., `variable`/`parameter`/`property`/`field`/`attribute`/`constant`); builtins, macros and special forms keep fixed colours. Each kind has its own 12-colour palette (cool for functions, warm for types, pastel for variables); every distinct name gets its own colour, with probing so up to 12 names of a kind never collide.
+- `lb-syntax`: overlapping captures on the same node are ranked by specificity (plain `variable` loses to everything; `function.builtin` beats `function`), with query order only as a tiebreak. The old "later pattern wins" rule broke Go, whose query lists the `variable` catch-all last.
+- `lb-syntax`: a `(identifier) @variable` catch-all is prepended to every query that accepts it (Rust never captures local variables).
+- New ignored test builds Python, Rust, JavaScript, Go and C grammars and checks two types, two functions and two variables in each get different colours.
+
+### Why
+User wanted same-looking names (`foo` vs `foo2`) to be distinguishable for every kind of name in every language.
+
+### Budget impact
+- Binary delta: see release size in the next entry
+- Startup delta: no change
+- RSS delta: no change
+- New deps: none
+
+### Follow-ups
+- Languages other than the five tested may use other capture names (e.g. `@entity.name.function`); extend `name_kind` as needed.
+- More than 12 names of one kind repeat colours.
+
+---
+
+## LB-0024 — Searchable actions menu, opened with Ctrl-Space
+
+- **Date**: 2026-11-22
+- **Crate(s)**: lb-app, lb-tui
+- **Agent**: Claude
+- **Parent**: LB-0016
+
+### What changed
+- The actions menu opens with `Ctrl-Space` (also reported as NUL by some terminals) or `F1`, in any mode; plain `Space` in Normal mode no longer opens it.
+- The menu and the language pickers filter as you type (case-insensitive, each word must appear). Movement is Up/Down, Tab/Shift-Tab, Ctrl-N/P, Ctrl-J/K; `j`/`k` and the 1-9 shortcuts were removed because letters and digits are search text. `Esc` clears the search, then closes.
+- The search text is shown in the overlay's input line; empty results show "no matches".
+
+### Why
+User asked for Ctrl-Space instead of Space and for searchable options.
+
+### Budget impact
+- Binary delta: ~+8 KB (1,118,208 -> 1,126,912 bytes)
+- Startup delta: no change
+- RSS delta: no change
+- New deps: none
+
+### Follow-ups
+- Ctrl-Space was not tested on a real terminal; F1 is the fallback.

@@ -50,6 +50,7 @@ commands and work the same in Normal and Insert.
 | Key | Action |
 |-----|--------|
 | Arrow keys, Home, End, PageUp, PageDown | Movement (always available) |
+| `F5` | Reload the file from disk (if there are unsaved edits, only refreshes syntax highlighting) |
 | `Ctrl-S` | Save (a file opened by name, even a new one like `luckybird hello.py`, is created on save) |
 | `Ctrl-Z` | Undo |
 | `Ctrl-Y` | Redo |
@@ -124,3 +125,20 @@ force_quit, hover, mode switching (normal/insert), `o`/`O` open-line.
 `next_buffer`, `prev_buffer`, `toggle_comment`, `add_cursor_above`,
 `add_cursor_below`, `select_next_match`, `goto_definition`,
 `trigger_completion`.
+
+## Actions menu (`Ctrl-Space` or `F1`, in any mode)
+
+A searchable overlay with the actions that don't have their own key. Just start typing to filter the list (each word you type must appear in the entry). Move with the arrow keys, `Tab` / `Shift-Tab`, `Ctrl-N` / `Ctrl-P` or `Ctrl-J` / `Ctrl-K`; pick with `Enter`. `Esc` clears the search, and closes the menu when the search is empty. `Ctrl-Space` or `F1` closes it too. If your terminal does not send `Ctrl-Space`, use `F1`.
+
+The language pickers work the same way.
+
+| Action | What it does |
+|--------|--------------|
+| Save | Save the buffer |
+| Save as... | Ask for a file name, write to it and use it as the buffer's name |
+| Open... | Ask for a path and open it |
+| Install syntax highlighting... | Pick a language; its tree-sitter grammar is built from source (needs `git` and a C compiler; no `tree-sitter` CLI) |
+| Install language server... | Pick a language; its server is installed with `rustup`, `npm`, `go` or `cargo` |
+| Quit / Quit without saving | Leave the editor |
+
+Installs run in the background and report in the status line. Reopen a file afterwards to get highlighting.

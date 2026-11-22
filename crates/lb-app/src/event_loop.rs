@@ -46,18 +46,33 @@ pub fn spawn_event_thread() -> mpsc::UnboundedReceiver<EditorEvent> {
 /// single render: we await the next event, then drain everything else queued
 /// behind it before redrawing. This keeps redraw count proportional to user-
 /// perceivable change instead of raw event count.
-pub async fn run(app: &mut App, event_rx: &mut mpsc::UnboundedReceiver<EditorEvent>) {
+pub async fn run(
+    app: &mut App,
+    event_rx: &mut mpsc::UnboundedReceiver<EditorEvent>,
+    job_rx: &mut mpsc::UnboundedReceiver<String>,
+) {
     if let Err(e) = app.render() {
         warn!("initial render error: {e}");
     }
 
     loop {
         // Block for at least one event.
-        let mut ev = match event_rx.recv().await {
-            Some(ev) => ev,
-            None => {
-                debug!("event channel closed; exiting loop");
-                break;
+        let mut ev = tokio::select! {
+            ev = event_rx.recv() => match ev {
+                Some(ev) => ev,
+                None => {
+                    debug!("event channel closed; exiting loop");
+                    break;
+                }
+            },
+            msg = job_rx.recv() => {
+                if let Some(msg) = msg {
+                    app.status_msg = Some(msg);
+                    if let Err(e) = app.render() {
+                        warn!("render error: {e}");
+                    }
+                }
+                continue;
             }
         };
 

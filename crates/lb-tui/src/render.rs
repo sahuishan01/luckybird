@@ -9,17 +9,18 @@ use ratatui::{
 };
 use unicode_width::UnicodeWidthStr;
 
+use crate::overlay::{self, OverlayModel};
 use crate::statusline::StatusLine;
 
 // ─── Data types consumed by the render layer ────────────────────────────────
 
-/// A single syntax-highlight span: byte range + capture index.
-/// Produced by lb-syntax (LB-0005); ignored until then.
+/// A syntax-highlight span: byte range plus foreground colour. Spans must be
+/// sorted by `start` and must not overlap.
 #[derive(Debug, Clone)]
 pub struct Highlight {
     pub start: usize,
     pub end: usize,
-    pub capture: u32,
+    pub rgb: (u8, u8, u8),
 }
 
 /// LSP diagnostic attached to a byte range.
@@ -47,13 +48,15 @@ pub enum DiagnosticSeverity {
 pub struct View<'a> {
     pub buffer: &'a Buffer,
     pub selection: &'a Selection,
-    /// Syntax highlights (empty until lb-syntax is wired in).
+    /// Syntax highlights (sorted, non-overlapping).
     pub highlights: &'a [Highlight],
     /// LSP diagnostics (empty until lb-lsp is wired in).
     pub diagnostics: &'a [Diagnostic],
     pub status: StatusLine,
     /// Index of the first visible line (0-based).
     pub scroll_offset: usize,
+    /// Overlay card drawn on top of the editor, if open.
+    pub overlay: Option<&'a OverlayModel>,
 }
 
 // ─── Editor widget ───────────────────────────────────────────────────────────
@@ -98,6 +101,10 @@ impl Widget for EditorWidget<'_> {
 pub fn render_frame(frame: &mut Frame, view: &View) {
     let area = frame.area();
     frame.render_widget(EditorWidget::new(view), area);
+    if let Some(model) = view.overlay {
+        overlay::render(model, area, frame.buffer_mut());
+        return;
+    }
 
     // Position the terminal cursor.
     if let Some(pos) = cursor_screen_pos(view, area) {
@@ -201,8 +208,9 @@ fn render_text(view: &View, area: Rect, buf: &mut RatBuf) {
             })
             .collect();
 
-        // Write text with selection highlight applied per character.
-        // LB-0005 will replace this loop with syntax-highlight spans.
+        // Write text with syntax colours and selection highlight per character.
+        let line_abs_start = view.buffer.line_to_byte(line_idx).unwrap_or(0);
+        let mut span_idx = view.highlights.partition_point(|h| h.end <= line_abs_start);
         let mut visual_col: u16 = 0;
         let mut byte_pos: usize = 0;
         for ch in line_text.chars() {
@@ -214,10 +222,24 @@ fn render_text(view: &View, area: Rect, buf: &mut RatBuf) {
                 .iter()
                 .any(|(s, e)| byte_pos >= *s && byte_pos < *e);
 
+            let abs = line_abs_start + byte_pos;
+            while view.highlights.get(span_idx).is_some_and(|h| h.end <= abs) {
+                span_idx += 1;
+            }
+            let fg = view
+                .highlights
+                .get(span_idx)
+                .filter(|h| h.start <= abs)
+                .map(|h| Color::Rgb(h.rgb.0, h.rgb.1, h.rgb.2));
+
             let style = if in_sel {
                 Style::new().bg(Color::Rgb(60, 90, 120))
             } else {
                 line_style
+            };
+            let style = match fg {
+                Some(fg) => style.fg(fg),
+                None => style,
             };
 
             buf.set_string(area.left() + visual_col, y, &ch.to_string(), style);
@@ -370,6 +392,7 @@ mod tests {
             diagnostics: &[],
             status,
             scroll_offset: 0,
+            overlay: None,
         }
     }
 
@@ -385,6 +408,30 @@ mod tests {
         terminal
             .draw(|f| render_frame(f, &view))
             .unwrap();
+    }
+
+    #[test]
+    fn highlighted_text_gets_its_colour() {
+        let buf = Buffer::from_str("def f():\n    return 1\n");
+        let sel = Selection::point(8);
+        let spans = [
+            Highlight { start: 0, end: 3, rgb: (198, 120, 221) },
+            Highlight { start: 13, end: 19, rgb: (198, 120, 221) },
+        ];
+        let mut view = test_view(&buf, &sel, StatusLine::new());
+        view.highlights = &spans;
+
+        let mut terminal = Terminal::new(TestBackend::new(40, 10)).unwrap();
+        terminal.draw(|f| render_frame(f, &view)).unwrap();
+        let out = terminal.backend().buffer().clone();
+
+        // Gutter is 2 columns wide for a 3-line buffer: text starts at x = 2.
+        let fg = |x: u16, y: u16| out[(x, y)].fg;
+        let purple = Color::Rgb(198, 120, 221);
+        assert_eq!(fg(2, 0), purple, "'d' of def");
+        assert_eq!(fg(4, 0), purple, "'f' of def");
+        assert_ne!(fg(6, 0), purple, "'f' after the keyword");
+        assert_eq!(fg(2 + 4, 1), purple, "'r' of return");
     }
 
     #[test]

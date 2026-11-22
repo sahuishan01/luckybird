@@ -70,6 +70,11 @@ impl SyntaxLayer {
         }
     }
 
+    /// Capture name (e.g. `keyword`, `string.special`) for a span's capture index.
+    pub fn capture_name(&self, index: u32) -> Option<&str> {
+        self.inner.as_ref().and_then(|h| h.capture_name(index))
+    }
+
     /// `true` when a grammar + query are loaded (full highlighting active).
     pub fn is_active(&self) -> bool {
         self.inner.is_some()
@@ -137,6 +142,11 @@ impl SyntaxManager {
                 SyntaxLayer::plain(language.to_string())
             }
         }
+    }
+
+    /// Forget a loaded grammar so a newly installed build is picked up.
+    pub fn forget_grammar(&mut self, language: &str) {
+        self.loader.forget(language);
     }
 
     fn load_query(&self, language: &str) -> Option<String> {

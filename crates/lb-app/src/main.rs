@@ -1,6 +1,11 @@
 mod app;
+mod overlay;
+mod paths;
+mod theme;
 mod commands;
+mod compile;
 mod event_loop;
+mod installer;
 
 use std::path::PathBuf;
 
@@ -117,7 +122,9 @@ async fn main() -> anyhow::Result<()> {
     // Enter TUI.
     let tui = Tui::enter().context("entering TUI")?;
 
-    let mut app = app::App::new(config, tui, syntax, lsp, plugins);
+    let (job_tx, mut job_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    let installer = installer::Installer::new(job_tx, config_grammar_dir(), config_query_dir());
+    let mut app = app::App::new(config, tui, syntax, lsp, plugins, installer);
 
     // Open files from CLI.
     for file in &args.files {
@@ -128,7 +135,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Start event thread and run loop.
     let mut event_rx = event_loop::spawn_event_thread();
-    event_loop::run(&mut app, &mut event_rx).await;
+    event_loop::run(&mut app, &mut event_rx, &mut job_rx).await;
 
     // Restore terminal before exit.
     app.tui.leave().context("leaving TUI")?;
