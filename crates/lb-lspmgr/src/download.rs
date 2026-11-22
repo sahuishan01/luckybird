@@ -13,7 +13,11 @@ pub enum DownloadError {
     Http(String),
     Checksum { expected: String, got: String },
     Extract(String),
+    Rejected(&'static str),
 }
+
+/// Upper bound on a downloaded archive; protects against unbounded memory use.
+const MAX_DOWNLOAD_BYTES: u64 = 512 * 1024 * 1024;
 
 impl std::fmt::Display for DownloadError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -24,6 +28,7 @@ impl std::fmt::Display for DownloadError {
                 write!(f, "checksum mismatch: expected {expected}, got {got}")
             }
             Self::Extract(e) => write!(f, "extraction error: {e}"),
+            Self::Rejected(why) => write!(f, "download rejected: {why}"),
         }
     }
 }
@@ -35,8 +40,8 @@ impl From<io::Error> for DownloadError {
 
 // ─── Download + verify + extract ─────────────────────────────────────────────
 
-/// Download `url` to a temp file, verify the SHA-256 if provided, then
-/// extract into `dest_dir`.
+/// Download `url` over https, verify its SHA-256 (mandatory), then extract
+/// into `dest_dir`.
 ///
 /// `archive_format` controls extraction:
 /// - `"gz"` — single-file gzip (extracts to `<dest_dir>/<binary_name>`)
@@ -45,38 +50,44 @@ impl From<io::Error> for DownloadError {
 /// - `""` — raw binary (no extraction, just copy)
 pub fn download_and_install(
     url: &str,
-    expected_sha256: Option<&str>,
+    expected_sha256: &str,
     dest_dir: &Path,
     binary_name: &str,
     archive_format: &str,
 ) -> Result<PathBuf, DownloadError> {
+    if !url.starts_with("https://") {
+        return Err(DownloadError::Rejected("url must use https"));
+    }
+    let is_plain_name = Path::new(binary_name)
+        .file_name()
+        .is_some_and(|n| n == std::ffi::OsStr::new(binary_name));
+    if !is_plain_name {
+        return Err(DownloadError::Rejected("binary name must be a plain file name"));
+    }
+
     info!(url, "downloading LSP server");
 
-    // Fetch into memory (ureq blocking).
     let resp = ureq::get(url)
         .call()
         .map_err(|e| DownloadError::Http(e.to_string()))?;
 
     let mut data = Vec::new();
-    let mut reader = resp.into_reader();
-    io::Read::read_to_end(&mut reader, &mut data)
-        .map_err(DownloadError::Io)?;
+    let mut reader = io::Read::take(resp.into_reader(), MAX_DOWNLOAD_BYTES + 1);
+    io::Read::read_to_end(&mut reader, &mut data).map_err(DownloadError::Io)?;
+    if data.len() as u64 > MAX_DOWNLOAD_BYTES {
+        return Err(DownloadError::Rejected("download exceeds size limit"));
+    }
 
     debug!(bytes = data.len(), "download complete");
 
-    // Verify checksum.
-    if let Some(expected) = expected_sha256 {
-        let mut hasher = Sha256::new();
-        hasher.update(&data);
-        let got = format!("{:x}", hasher.finalize());
-        if got != expected {
-            return Err(DownloadError::Checksum {
-                expected: expected.to_string(),
-                got,
-            });
-        }
-        debug!("checksum OK");
+    let got = format!("{:x}", Sha256::digest(&data));
+    if !got.eq_ignore_ascii_case(expected_sha256) {
+        return Err(DownloadError::Checksum {
+            expected: expected_sha256.to_string(),
+            got,
+        });
     }
+    debug!("checksum OK");
 
     // Ensure destination directory exists.
     fs::create_dir_all(dest_dir)?;
@@ -187,6 +198,20 @@ fn write_raw(data: &[u8], dest_dir: &Path, binary_name: &str) -> Result<PathBuf,
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rejects_non_https_url() {
+        let dir = std::env::temp_dir().join("lb_test_http");
+        let r = download_and_install("http://example.com/x", "00", &dir, "x", "");
+        assert!(matches!(r, Err(DownloadError::Rejected(_))));
+    }
+
+    #[test]
+    fn rejects_path_in_binary_name() {
+        let dir = std::env::temp_dir().join("lb_test_name");
+        let r = download_and_install("https://example.com/x", "00", &dir, "../evil", "");
+        assert!(matches!(r, Err(DownloadError::Rejected(_))));
+    }
 
     #[test]
     fn write_raw_creates_file() {

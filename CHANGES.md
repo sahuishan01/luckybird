@@ -345,3 +345,27 @@ User asked to convert the editor from modeless to modal. The previous design had
 
 ### Follow-ups
 - none
+
+---
+
+## LB-0013 — Harden Lua sandbox and LSP download verification
+
+- **Date**: 2026-11-22
+- **Crate(s)**: lb-plugin, lb-lspmgr
+- **Agent**: Claude
+
+### What changed
+- `lb-plugin`: Lua state is built with a whitelist of stdlibs (coroutine, table, string, utf8, math, os). `io`, `package`/`require`, `debug` and `collectgarbage` are never exposed; `os` is reduced to `clock/time/date/difftime`; `load` is restricted to text chunks.
+- `lb-lspmgr`: `download_and_install` now requires a SHA-256, requires an https URL, rejects binary names containing path components, and caps downloads at 512 MB.
+
+### Why
+Security review: the blocklist sandbox left `package.loadlib`, `io.output` and `debug.*` reachable, and the checksum was optional, contradicting CORE.md section 6.
+
+### Budget impact
+- Binary delta: no change expected (not measured)
+- Startup delta: no change
+- RSS delta: no change
+- New deps: none
+
+### Follow-ups
+- Registry entries need URLs and SHA-256 values before the downloader is wired up.

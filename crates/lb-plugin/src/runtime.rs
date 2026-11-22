@@ -60,10 +60,14 @@ impl PluginRuntime {
             return Ok(());
         }
 
-        let lua = self.lua.get_or_init(|| {
-            debug!("initialising Lua 5.4 runtime");
-            Lua::new()
-        });
+        let lua = match self.lua.get() {
+            Some(lua) => lua,
+            None => {
+                debug!("initialising Lua 5.4 runtime");
+                let lua = sandbox::new_lua()?;
+                self.lua.get_or_init(|| lua)
+            }
+        };
 
         // Apply sandbox on first init.
         // We track this by checking if `lb` global already exists.
@@ -73,7 +77,6 @@ impl PluginRuntime {
         };
 
         if !already_inited {
-            sandbox::apply(lua)?;
             self.api.install(lua)?;
         }
 

@@ -1,44 +1,52 @@
-use mlua::{Lua, Result as LuaResult};
+use mlua::{Lua, LuaOptions, Result as LuaResult, StdLib, Table, Value};
 
-/// Remove or replace dangerous Lua standard-library functions.
+const OS_ALLOWED: [&str; 4] = ["clock", "time", "date", "difftime"];
+
+/// Create a Lua state that only has the pure standard libraries.
 ///
-/// After calling this function the Lua state cannot:
-/// - Execute arbitrary OS commands (`os.execute`, `os.exit`)
-/// - Open arbitrary files (`io.open`, `io.popen`)
-/// - Load arbitrary Lua code from the filesystem (`loadfile`, `dofile`)
-/// - Require packages from arbitrary paths (`require` is kept but restricted
-///   elsewhere)
+/// `io`, `package` (so `require` and `package.loadlib`) and `debug` are never
+/// loaded; a blocklist on them would leave escape hatches such as
+/// `io.output(path)` or `package.loadlib`.
+pub fn new_lua() -> LuaResult<Lua> {
+    let libs = StdLib::COROUTINE | StdLib::TABLE | StdLib::STRING | StdLib::UTF8 | StdLib::MATH
+        | StdLib::OS;
+    let lua = Lua::new_with(libs, LuaOptions::default())?;
+    apply(&lua)?;
+    Ok(lua)
+}
+
+/// Reduce an existing Lua state to the safe subset.
 ///
-/// `os.clock`, `os.time`, `os.date`, `os.difftime` are intentionally kept
-/// for use by plugins.
+/// Keeps only `os.clock/time/date/difftime`, removes everything that can touch
+/// the filesystem, load native code or inspect the VM, and restricts `load` to
+/// text chunks (precompiled bytecode can crash the VM).
 pub fn apply(lua: &Lua) -> LuaResult<()> {
-    // ── os table ───────────────────────────────────────────────────────────
-    let os: mlua::Table = lua.globals().get("os")?;
-    os.set("execute", mlua::Value::Nil)?;
-    os.set("exit", mlua::Value::Nil)?;
-    os.set("tmpname", mlua::Value::Nil)?;
-    os.set("rename", mlua::Value::Nil)?;
-    os.set("remove", mlua::Value::Nil)?;
-    os.set("setlocale", mlua::Value::Nil)?;
-    os.set("getenv", mlua::Value::Nil)?;
+    let globals = lua.globals();
 
-    // ── io table ───────────────────────────────────────────────────────────
-    let io: mlua::Table = lua.globals().get("io")?;
-    io.set("open", mlua::Value::Nil)?;
-    io.set("popen", mlua::Value::Nil)?;
-    io.set("lines", mlua::Value::Nil)?;
-    io.set("tmpfile", mlua::Value::Nil)?;
-
-    // ── load* / do* ────────────────────────────────────────────────────────
-    lua.globals().set("loadfile", mlua::Value::Nil)?;
-    lua.globals().set("dofile", mlua::Value::Nil)?;
-
-    // ── debug table — keep but strip dangerous parts ───────────────────────
-    if let Ok(debug_tbl) = lua.globals().get::<_, mlua::Table>("debug") {
-        debug_tbl.set("getinfo", mlua::Value::Nil)?;
-        debug_tbl.set("getupvalue", mlua::Value::Nil)?;
-        debug_tbl.set("setupvalue", mlua::Value::Nil)?;
+    let safe_os = lua.create_table()?;
+    if let Ok(os) = globals.get::<_, Table>("os") {
+        for name in OS_ALLOWED {
+            let f: Value = os.get(name)?;
+            safe_os.set(name, f)?;
+        }
     }
+    globals.set("os", safe_os)?;
+
+    for name in [
+        "io", "debug", "package", "require", "loadfile", "dofile", "loadstring", "collectgarbage",
+    ] {
+        globals.set(name, Value::Nil)?;
+    }
+
+    let text_only_load: mlua::Function = lua
+        .load(
+            "local raw = load\n\
+             return function(chunk, name, _mode, env)\n\
+                 return raw(chunk, name, 't', env)\n\
+             end",
+        )
+        .eval()?;
+    globals.set("load", text_only_load)?;
 
     Ok(())
 }
@@ -47,31 +55,57 @@ pub fn apply(lua: &Lua) -> LuaResult<()> {
 mod tests {
     use super::*;
 
+    fn is_nil(lua: &Lua, expr: &str) -> bool {
+        lua.load(expr).eval::<Value>().map(|v| matches!(v, Value::Nil)).unwrap_or(false)
+    }
+
     #[test]
     fn sandbox_removes_os_execute() {
-        let lua = Lua::new();
-        apply(&lua).unwrap();
-        let result: mlua::Value = lua.globals().get("os").unwrap();
-        if let mlua::Value::Table(os) = result {
-            let exec: mlua::Value = os.get("execute").unwrap();
-            assert!(matches!(exec, mlua::Value::Nil));
-        }
+        let lua = new_lua().unwrap();
+        assert!(is_nil(&lua, "return os.execute"));
+        assert!(is_nil(&lua, "return os.getenv"));
+        assert!(is_nil(&lua, "return os.remove"));
     }
 
     #[test]
     fn sandbox_keeps_os_time() {
-        let lua = Lua::new();
-        apply(&lua).unwrap();
-        let os: mlua::Table = lua.globals().get("os").unwrap();
-        let time: mlua::Value = os.get("time").unwrap();
-        assert!(!matches!(time, mlua::Value::Nil));
+        let lua = new_lua().unwrap();
+        assert!(!is_nil(&lua, "return os.time"));
     }
 
     #[test]
     fn sandbox_removes_loadfile() {
+        let lua = new_lua().unwrap();
+        assert!(is_nil(&lua, "return loadfile"));
+        assert!(is_nil(&lua, "return dofile"));
+    }
+
+    #[test]
+    fn sandbox_has_no_io_package_or_debug() {
+        let lua = new_lua().unwrap();
+        for g in ["io", "package", "require", "debug"] {
+            assert!(is_nil(&lua, &format!("return {g}")), "{g} must be absent");
+        }
+    }
+
+    #[test]
+    fn apply_hardens_a_full_state() {
         let lua = Lua::new();
         apply(&lua).unwrap();
-        let v: mlua::Value = lua.globals().get("loadfile").unwrap();
-        assert!(matches!(v, mlua::Value::Nil));
+        assert!(is_nil(&lua, "return io"));
+        assert!(is_nil(&lua, "return package"));
+        assert!(is_nil(&lua, "return debug"));
+    }
+
+    #[test]
+    fn load_rejects_binary_chunks() {
+        let lua = new_lua().unwrap();
+        let ok: bool = lua
+            .load("local f = load('\\27Lua') return f == nil")
+            .eval()
+            .unwrap();
+        assert!(ok);
+        let works: i64 = lua.load("return load('return 1 + 1')()").eval().unwrap();
+        assert_eq!(works, 2);
     }
 }
