@@ -165,8 +165,16 @@ impl App {
     // ── File I/O ──────────────────────────────────────────────────────────
 
     pub fn open_file(&mut self, path: PathBuf) -> anyhow::Result<()> {
-        let text = std::fs::read_to_string(&path)
-            .with_context(|| format!("reading {}", path.display()))?;
+        let (text, is_new) = match std::fs::read_to_string(&path) {
+            Ok(text) => (text, false),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => (String::new(), true),
+            Err(e) => {
+                return Err(e).with_context(|| format!("reading {}", path.display()));
+            }
+        };
+        if is_new {
+            self.status_msg = Some(format!("New file {} — Ctrl-S to create it", path.display()));
+        }
         let language = self.syntax.detect(
             path.to_str().unwrap_or(""),
             text.lines().next(),
@@ -203,7 +211,7 @@ impl App {
         let path = match &buf.path {
             Some(p) => p.clone(),
             None => {
-                self.status_msg = Some("No file path — use Save As".to_string());
+                self.status_msg = Some("No file name — restart with: luckybird <file>".to_string());
                 return Ok(());
             }
         };
@@ -319,7 +327,7 @@ impl App {
 
     fn ensure_cursor_visible(&mut self) {
         let (_, height) = self.tui.size().unwrap_or((80, 24));
-        let content_height = (height.saturating_sub(1)) as usize; // minus status row
+        let content_height = (height.saturating_sub(2)) as usize; // minus status and hint rows
         let buf = &mut self.buffers[self.active];
         let cursor_line = buf
             .buffer

@@ -34,6 +34,14 @@ impl StatusLine {
         format!("{mode} {name}{dirty}  Ln {}, Col {}", self.line, self.col)
     }
 
+    /// Shortcut cheat-sheet for the bottom row, depending on the mode.
+    pub fn hint_text(&self) -> &'static str {
+        match self.mode {
+            "INSERT" => " Esc normal mode  |  ^S save  ^Z undo  ^Y redo  |  Ctrl-Q quit  F10 force-quit",
+            _ => " i/a/o insert  hjkl move  w/b word  0/$ line  x del  u undo  ^R redo  |  ^S save  q quit",
+        }
+    }
+
     /// One-line text for the right portion: encoding.
     pub fn right_text(&self) -> String {
         format!("{}  ", self.encoding)
@@ -61,6 +69,15 @@ mod tests {
         let mut s = StatusLine::new();
         s.filename = Some("main.rs".into());
         assert!(!s.left_text().contains("[+]"));
+    }
+
+    #[test]
+    fn hints_follow_mode() {
+        let mut s = StatusLine::new();
+        s.mode = "INSERT";
+        assert!(s.hint_text().contains("Esc"));
+        s.mode = "NORMAL";
+        assert!(s.hint_text().contains("^S save"));
     }
 
     #[test]

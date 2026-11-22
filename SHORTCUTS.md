@@ -50,7 +50,7 @@ commands and work the same in Normal and Insert.
 | Key | Action |
 |-----|--------|
 | Arrow keys, Home, End, PageUp, PageDown | Movement (always available) |
-| `Ctrl-S` | Save |
+| `Ctrl-S` | Save (a file opened by name, even a new one like `luckybird hello.py`, is created on save) |
 | `Ctrl-Z` | Undo |
 | `Ctrl-Y` | Redo |
 | `Ctrl-Q` | Quit (warns on unsaved changes; press again to discard) |

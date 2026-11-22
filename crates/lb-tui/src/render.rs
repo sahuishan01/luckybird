@@ -59,7 +59,7 @@ pub struct View<'a> {
 // ─── Editor widget ───────────────────────────────────────────────────────────
 
 /// A full-screen editor widget (buffer + status line).
-/// Split into a gutter, text area, and a 1-row status bar.
+/// Split into a gutter, text area, and a status bar and a 1-row shortcut hint bar.
 pub struct EditorWidget<'a> {
     view: &'a View<'a>,
 }
@@ -72,17 +72,19 @@ impl<'a> EditorWidget<'a> {
 
 impl Widget for EditorWidget<'_> {
     fn render(self, area: Rect, buf: &mut RatBuf) {
-        // Split: content rows + 1 status row
+        // Split: content rows + status row + hint row
         let areas = Layout::vertical([
             Constraint::Fill(1),
+            Constraint::Length(1),
             Constraint::Length(1),
         ])
         .split(area);
 
         match areas.as_ref() {
-            [content_area, status_area] => {
+            [content_area, status_area, hint_area] => {
                 render_content(self.view, *content_area, buf);
                 render_statusline(&self.view.status, *status_area, buf);
+                render_hints(&self.view.status, *hint_area, buf);
             }
             _ => {}
         }
@@ -285,6 +287,13 @@ fn render_statusline(status: &StatusLine, area: Rect, buf: &mut RatBuf) {
     }
 }
 
+fn render_hints(status: &StatusLine, area: Rect, buf: &mut RatBuf) {
+    let style = Style::new().bg(Color::Rgb(30, 36, 48)).fg(Color::Rgb(150, 160, 180));
+    let filler = " ".repeat(area.width as usize);
+    buf.set_string(area.left(), area.top(), &filler, style);
+    buf.set_string(area.left(), area.top(), status.hint_text(), style);
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /// Width of the gutter: number of digits in the last line number + one space.
@@ -312,7 +321,7 @@ fn cursor_screen_pos(view: &View, area: Rect) -> Option<ratatui::layout::Positio
         return None;
     }
     let screen_row = cursor_line - view.scroll_offset;
-    let content_height = area.height.saturating_sub(1) as usize; // minus status row
+    let content_height = area.height.saturating_sub(2) as usize; // minus status and hint rows
     if screen_row >= content_height {
         return None;
     }
