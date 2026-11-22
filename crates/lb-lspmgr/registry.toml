@@ -1,0 +1,156 @@
+# registry.toml — LSP server registry
+# Each section key is a canonical server name.
+# Fields:
+#   languages = list of language IDs this server handles
+#   binary    = executable name to search on PATH / in cache
+#   args      = extra arguments to pass on startup
+
+[rust-analyzer]
+languages = ["rust"]
+binary    = "rust-analyzer"
+args      = []
+
+[pyright]
+languages = ["python"]
+binary    = "pyright-langserver"
+args      = ["--stdio"]
+
+[typescript-language-server]
+languages = ["javascript", "typescript", "tsx", "jsx"]
+binary    = "typescript-language-server"
+args      = ["--stdio"]
+
+[gopls]
+languages = ["go"]
+binary    = "gopls"
+args      = []
+
+[clangd]
+languages = ["c", "cpp"]
+binary    = "clangd"
+args      = []
+
+[jdtls]
+languages = ["java"]
+binary    = "jdtls"
+args      = []
+
+[omnisharp]
+languages = ["csharp"]
+binary    = "omnisharp"
+args      = ["-lsp"]
+
+[ruby-lsp]
+languages = ["ruby"]
+binary    = "ruby-lsp"
+args      = []
+
+[lua-language-server]
+languages = ["lua"]
+binary    = "lua-language-server"
+args      = []
+
+[bash-language-server]
+languages = ["bash", "fish", "sh"]
+binary    = "bash-language-server"
+args      = ["start"]
+
+[vscode-html-language-server]
+languages = ["html"]
+binary    = "vscode-html-language-server"
+args      = ["--stdio"]
+
+[vscode-css-language-server]
+languages = ["css"]
+binary    = "vscode-css-language-server"
+args      = ["--stdio"]
+
+[vscode-json-language-server]
+languages = ["json"]
+binary    = "vscode-json-language-server"
+args      = ["--stdio"]
+
+[yaml-language-server]
+languages = ["yaml"]
+binary    = "yaml-language-server"
+args      = ["--stdio"]
+
+[taplo]
+languages = ["toml"]
+binary    = "taplo"
+args      = ["lsp", "stdio"]
+
+[marksman]
+languages = ["markdown"]
+binary    = "marksman"
+args      = ["server"]
+
+[sourcekit-lsp]
+languages = ["swift"]
+binary    = "sourcekit-lsp"
+args      = []
+
+[kotlin-language-server]
+languages = ["kotlin"]
+binary    = "kotlin-language-server"
+args      = []
+
+[metals]
+languages = ["scala"]
+binary    = "metals"
+args      = []
+
+[hls]
+languages = ["haskell"]
+binary    = "haskell-language-server-wrapper"
+args      = ["--lsp"]
+
+[elixir-ls]
+languages = ["elixir"]
+binary    = "elixir-ls"
+args      = []
+
+[erlang-ls]
+languages = ["erlang"]
+binary    = "erlang_ls"
+args      = []
+
+[ocamllsp]
+languages = ["ocaml"]
+binary    = "ocamllsp"
+args      = []
+
+[zls]
+languages = ["zig"]
+binary    = "zls"
+args      = []
+
+[terraform-ls]
+languages = ["terraform"]
+binary    = "terraform-ls"
+args      = ["serve"]
+
+[docker-langserver]
+languages = ["dockerfile"]
+binary    = "docker-langserver"
+args      = ["--stdio"]
+
+[tailwindcss-language-server]
+languages = ["html", "css", "javascript", "typescript", "tsx"]
+binary    = "tailwindcss-language-server"
+args      = ["--stdio"]
+
+[svelte-language-server]
+languages = ["svelte"]
+binary    = "svelteserver"
+args      = ["--stdio"]
+
+[phpactor]
+languages = ["php"]
+binary    = "phpactor"
+args      = ["language-server"]
+
+[nil]
+languages = ["nix"]
+binary    = "nil"
+args      = []

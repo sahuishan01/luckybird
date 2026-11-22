@@ -1,0 +1,87 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/lb-core",
+    "crates/lb-tui",
+    "crates/lb-syntax",
+    "crates/lb-lsp",
+    "crates/lb-lspmgr",
+    "crates/lb-config",
+    "crates/lb-plugin",
+    "crates/lb-app",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[workspace.dependencies]
+# Internal crates
+lb-core    = { path = "crates/lb-core" }
+lb-config  = { path = "crates/lb-config" }
+lb-tui     = { path = "crates/lb-tui" }
+lb-syntax  = { path = "crates/lb-syntax" }
+lb-lsp     = { path = "crates/lb-lsp" }
+lb-lspmgr  = { path = "crates/lb-lspmgr" }
+lb-plugin  = { path = "crates/lb-plugin" }
+
+# Text
+ropey    = "1"
+smallvec = { version = "1", features = ["union"] }
+
+# Async
+tokio = { version = "1", default-features = false, features = [
+    "rt", "process", "io-util", "sync", "macros", "net", "time",
+] }
+
+# Serialization
+serde      = { version = "1", features = ["derive"] }
+serde_json = { version = "1", default-features = false, features = ["std"] }
+toml       = { version = "0.8", default-features = false, features = ["parse"] }
+
+# Platform dirs
+dirs = "5"
+
+# Syntax
+tree-sitter         = "0.24"
+libloading          = "0.8"
+streaming-iterator  = "0.1"
+
+# LSP
+lsp-types = "0.97"
+url       = "2"
+
+# LSP server management
+which  = "6"
+ureq   = { version = "2", features = ["tls"] }
+sha2   = "0.10"
+flate2 = "1"
+zip    = { version = "2", default-features = false, features = ["deflate"] }
+tar    = "0.4"
+
+# Plugins
+mlua = { version = "0.9", features = ["lua54", "vendored"] }
+
+# CLI
+lexopt   = "0.3"
+anyhow   = "1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Logging
+tracing = "0.1"
+
+# Dev
+criterion = { version = "0.5", features = ["html_reports"] }
+
+# ─── Build profiles ──────────────────────────────────────────────────────────
+
+[profile.release]
+lto           = "fat"
+codegen-units = 1
+panic         = "abort"
+strip         = "symbols"
+
+[profile.release-min]
+inherits  = "release"
+opt-level = "z"

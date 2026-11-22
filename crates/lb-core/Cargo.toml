@@ -1,0 +1,15 @@
+[package]
+name    = "lb-core"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+ropey.workspace    = true
+smallvec.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name    = "edit"
+harness = false

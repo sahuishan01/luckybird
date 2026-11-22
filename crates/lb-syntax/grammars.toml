@@ -1,0 +1,154 @@
+# grammars.toml — embedded language registry
+# Each entry maps a language key to its file extensions, tree-sitter C symbol,
+# and optional shebangs. Grammar .so/.dll/.dylib files live in
+# ~/.local/share/luckybird/grammars/<lang>.<ext>
+
+[rust]
+extensions = ["rs"]
+grammar_fn = "tree_sitter_rust"
+shebangs   = []
+
+[python]
+extensions = ["py", "pyi"]
+grammar_fn = "tree_sitter_python"
+shebangs   = ["python", "python3"]
+
+[javascript]
+extensions = ["js", "mjs", "cjs"]
+grammar_fn = "tree_sitter_javascript"
+shebangs   = ["node"]
+
+[typescript]
+extensions = ["ts", "mts", "cts"]
+grammar_fn = "tree_sitter_typescript"
+shebangs   = []
+
+[tsx]
+extensions = ["tsx"]
+grammar_fn = "tree_sitter_tsx"
+shebangs   = []
+
+[go]
+extensions = ["go"]
+grammar_fn = "tree_sitter_go"
+shebangs   = []
+
+[c]
+extensions = ["c", "h"]
+grammar_fn = "tree_sitter_c"
+shebangs   = []
+
+[cpp]
+extensions = ["cpp", "cxx", "cc", "hpp", "hxx", "hh"]
+grammar_fn = "tree_sitter_cpp"
+shebangs   = []
+
+[java]
+extensions = ["java"]
+grammar_fn = "tree_sitter_java"
+shebangs   = []
+
+[csharp]
+extensions = ["cs"]
+grammar_fn = "tree_sitter_c_sharp"
+shebangs   = []
+
+[ruby]
+extensions = ["rb"]
+grammar_fn = "tree_sitter_ruby"
+shebangs   = ["ruby"]
+
+[lua]
+extensions = ["lua"]
+grammar_fn = "tree_sitter_lua"
+shebangs   = ["lua"]
+
+[bash]
+extensions = ["sh", "bash"]
+grammar_fn = "tree_sitter_bash"
+shebangs   = ["bash", "sh", "zsh"]
+
+[fish]
+extensions = ["fish"]
+grammar_fn = "tree_sitter_fish"
+shebangs   = ["fish"]
+
+[html]
+extensions = ["html", "htm"]
+grammar_fn = "tree_sitter_html"
+shebangs   = []
+
+[css]
+extensions = ["css"]
+grammar_fn = "tree_sitter_css"
+shebangs   = []
+
+[json]
+extensions = ["json", "jsonc"]
+grammar_fn = "tree_sitter_json"
+shebangs   = []
+
+[yaml]
+extensions = ["yaml", "yml"]
+grammar_fn = "tree_sitter_yaml"
+shebangs   = []
+
+[toml]
+extensions = ["toml"]
+grammar_fn = "tree_sitter_toml"
+shebangs   = []
+
+[markdown]
+extensions = ["md", "markdown"]
+grammar_fn = "tree_sitter_markdown"
+shebangs   = []
+
+[sql]
+extensions = ["sql"]
+grammar_fn = "tree_sitter_sql"
+shebangs   = []
+
+[dockerfile]
+extensions = ["Dockerfile", "dockerfile"]
+grammar_fn = "tree_sitter_dockerfile"
+shebangs   = []
+
+[swift]
+extensions = ["swift"]
+grammar_fn = "tree_sitter_swift"
+shebangs   = []
+
+[kotlin]
+extensions = ["kt", "kts"]
+grammar_fn = "tree_sitter_kotlin"
+shebangs   = []
+
+[scala]
+extensions = ["scala", "sc"]
+grammar_fn = "tree_sitter_scala"
+shebangs   = []
+
+[haskell]
+extensions = ["hs", "lhs"]
+grammar_fn = "tree_sitter_haskell"
+shebangs   = []
+
+[elixir]
+extensions = ["ex", "exs"]
+grammar_fn = "tree_sitter_elixir"
+shebangs   = ["elixir"]
+
+[erlang]
+extensions = ["erl", "hrl"]
+grammar_fn = "tree_sitter_erlang"
+shebangs   = []
+
+[ocaml]
+extensions = ["ml", "mli"]
+grammar_fn = "tree_sitter_ocaml"
+shebangs   = []
+
+[zig]
+extensions = ["zig"]
+grammar_fn = "tree_sitter_zig"
+shebangs   = []
