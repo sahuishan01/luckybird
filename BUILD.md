@@ -17,7 +17,7 @@ cargo build -p lb-app
 
 ```sh
 cargo build --release -p lb-app
-./target/release/luckybird [FILE...]   # ~2.9 MB, self-contained
+./target/release/luckybird [FILE...]   # ~0.9 MB, self-contained
 ```
 
 Release profile is configured in the root `Cargo.toml`:
@@ -46,7 +46,7 @@ cargo test -p lb-core            # single crate
 
 ## Distribution
 
-The binary is fully self-contained: Lua 5.4 is vendored (no system Lua required),
+The binary is fully self-contained:
 and there are no other runtime shared-library dependencies beyond the C runtime.
 
 ### Windows — MSI

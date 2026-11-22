@@ -369,3 +369,55 @@ Security review: the blocklist sandbox left `package.loadlib`, `io.output` and `
 
 ### Follow-ups
 - Registry entries need URLs and SHA-256 values before the downloader is wired up.
+
+---
+
+## LB-0014 — Shrink release binary from 2.9 MB to 1.2 MB
+
+- **Date**: 2026-11-22
+- **Crate(s)**: workspace, lb-syntax
+- **Agent**: Claude
+
+### What changed
+- `tracing-subscriber`: dropped default features (`env-filter` pulled in `regex`).
+- Release profile uses `opt-level = "z"`; `tokio` no longer enables `net`.
+- `vendor/tree-sitter` is tree-sitter 0.24.7 with `regex::bytes` replaced by `regex-lite` (`#match?` predicates now only match valid UTF-8 text); wired in through `[patch.crates-io]`.
+
+### Why
+User asked to reduce binary size. `regex` was ~470 KB and only reachable through tree-sitter query predicates and the unused env-filter.
+
+### Budget impact
+- Binary delta: -1.7 MB (2,920,448 -> 1,240,576 bytes)
+- Startup delta: not measured
+- RSS delta: not measured
+- New deps: regex-lite@0.1 (+23 KB); removed regex, regex-automata, regex-syntax, aho-corasick
+
+### Follow-ups
+- Rebase `vendor/tree-sitter` when upgrading tree-sitter.
+- Remaining size: std ~226 KB, toml_edit+winnow ~100 KB, Lua ~100 KB.
+
+---
+
+## LB-0015 — Replace Lua plugins with compile-time Rust plugins
+
+- **Date**: 2026-11-22
+- **Crate(s)**: lb-plugin, lb-app
+- **Agent**: Claude
+- **Supersedes**: LB-0013 (sandbox part; the sandbox no longer exists)
+
+### What changed
+- `lb-plugin` now exposes a `Plugin` trait, `PluginApi` (`bind_key`, `on_event`) and `PluginRuntime` (`register`, `fire_event`, `command_for`). `mlua` and the Lua sandbox are removed.
+- `lb-app` looks up plugin keybindings with `command_for`; `[[plugin]]` config entries are ignored with a warning. Removed the now-unused `shellexpand_tilde`.
+- CORE.md section 6 and `docs/agents/lb-plugin.md` rewritten for Rust plugins.
+
+### Why
+User asked for Rust plugins instead of Lua to shrink the binary; Lua and `mlua` cost ~100 KB and a sandbox attack surface.
+
+### Budget impact
+- Binary delta: -292 KB (1,241,088 -> 948,736 bytes); total from 2.9 MB is -2.0 MB
+- Startup delta: not measured
+- RSS delta: not measured
+- New deps: none (removed mlua, mlua-sys, vendored Lua)
+
+### Follow-ups
+- No plugin exists yet; add handlers with editor access when the first one needs it.

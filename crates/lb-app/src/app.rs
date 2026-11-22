@@ -392,10 +392,7 @@ impl App {
         }
 
         // 3. Plugin-registered keymaps (always global for now).
-        let plugin_cmd = {
-            let km = self.plugins.api().keymap.get_all();
-            km.get(&chord).and_then(|n| from_name(n))
-        };
+        let plugin_cmd = self.plugins.command_for(&chord).and_then(from_name);
         if let Some(cmd) = plugin_cmd {
             return self.execute(cmd);
         }

@@ -1,10 +1,9 @@
-//! Lua 5.4 plugin runtime with sandboxed environment and `lb.*` API.
+//! Compile-time Rust plugins.
 //!
-//! # Lazy-load contract
-//!
-//! The Lua VM is **not** created at import time.  `PluginRuntime::init_if_needed`
-//! is a no-op when called with an empty slice, so the VM is only started when
-//! at least one plugin path is configured.
+//! A plugin implements [`Plugin`] and registers keymaps and event handlers
+//! through [`PluginApi`]. Plugins are linked into the editor binary (enable
+//! them with Cargo features in `lb-app`), so they cost nothing at startup
+//! beyond their own code.
 
 #![cfg_attr(
     not(test),
@@ -16,9 +15,6 @@
     )
 )]
 
-pub mod api;
 pub mod runtime;
-pub mod sandbox;
 
-pub use api::LbApi;
-pub use runtime::{PluginError, PluginRuntime};
+pub use runtime::{Plugin, PluginApi, PluginRuntime};

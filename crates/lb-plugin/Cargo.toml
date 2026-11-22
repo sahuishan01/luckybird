@@ -4,7 +4,4 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-lb-core.workspace   = true
-lb-config.workspace = true
-mlua.workspace      = true
-tracing.workspace   = true
+tracing.workspace = true

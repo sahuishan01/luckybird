@@ -110,20 +110,8 @@ async fn main() -> anyhow::Result<()> {
         .unwrap_or_else(|| PathBuf::from("."));
     let lsp = LspManager::new(lsp_cache_dir(), workspace_root);
     let plugins = PluginRuntime::new();
-
-    // Init plugins (deferred — only starts Lua if paths are configured).
-    let plugin_paths: Vec<PathBuf> = config
-        .plugins
-        .iter()
-        .filter_map(|p| {
-            let expanded = shellexpand_tilde(&p.path);
-            Some(PathBuf::from(expanded))
-        })
-        .collect();
-    let plugin_path_refs: Vec<&std::path::Path> =
-        plugin_paths.iter().map(PathBuf::as_path).collect();
-    if let Err(e) = plugins.init_if_needed(&plugin_path_refs) {
-        tracing::warn!("plugin init error: {e}");
+    if !config.plugins.is_empty() {
+        tracing::warn!("[[plugin]] entries are ignored: plugins are compiled in as Rust crates");
     }
 
     // Enter TUI.
@@ -167,15 +155,4 @@ fn init_logging(log_path: &std::path::Path) {
         );
         let _ = tracing::subscriber::set_global_default(subscriber);
     }
-}
-
-// ─── Shell tilde expansion ────────────────────────────────────────────────────
-
-fn shellexpand_tilde(path: &str) -> String {
-    if let Some(rest) = path.strip_prefix("~/") {
-        if let Some(home) = dirs::home_dir() {
-            return home.join(rest).to_string_lossy().into_owned();
-        }
-    }
-    path.to_string()
 }

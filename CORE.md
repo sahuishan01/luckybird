@@ -93,7 +93,7 @@ Adding a new dependency requires a `CHANGES.md` entry justifying it and noting t
 - **No comments unless they explain *why***. Names should explain *what*. If you wrote a comment that paraphrases the code, delete it.
 - **No trailing summaries in PR descriptions** that paraphrase the diff. PR descriptions explain motivation; the diff is the spec.
 - **Tests live next to code** (`#[cfg(test)] mod tests`) for unit; integration tests in `crates/<crate>/tests/`.
-- **No `unsafe`** outside of FFI boundaries (`tree-sitter` grammar loading, `mlua`). Every `unsafe` block has a `// SAFETY:` comment.
+- **No `unsafe`** outside of FFI boundaries (`tree-sitter` grammar loading). Every `unsafe` block has a `// SAFETY:` comment.
 - **No `String` allocation in hot loops** (render, keypress dispatch, edit op). Use `&str`, `Cow<str>`, `SmolStr`, or pre-allocated buffers.
 
 ---
@@ -125,7 +125,7 @@ After every dependency change, run `cargo bloat --release --crates -n 20` and pa
 
 ## 6. Security
 
-- **Plugin sandbox is load-bearing.** Lua plugins must not have raw `os.execute`, `io.open` outside their data dir, or arbitrary `require`. If you weaken the sandbox, escalate.
+- **Plugins are compiled-in Rust crates.** There is no script runtime and no sandbox; only add plugins you trust. Loading plugin code at runtime (Lua, WASM, DLLs) needs a new sandbox design and explicit approval.
 - **LSP downloads must verify SHA-256** against the registry. No "trust the server" — checksum or fail.
 - **No outbound network calls** other than: (a) explicit LSP-server downloads requested by user, (b) explicit grammar downloads requested by user, (c) opt-in `:LspUpdate`. No analytics, no crash reporting, no auto-update of the editor itself.
 

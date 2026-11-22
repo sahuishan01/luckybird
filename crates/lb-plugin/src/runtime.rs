@@ -1,152 +1,123 @@
-use std::path::Path;
-use std::sync::OnceLock;
+use std::collections::HashMap;
 
-use mlua::Lua;
 use tracing::debug;
 
-use crate::api::LbApi;
-use crate::sandbox;
+type Handler = Box<dyn Fn() + Send + Sync>;
 
-// ─── Error ───────────────────────────────────────────────────────────────────
+/// An editor plugin. Implementors are linked into the binary at compile time.
+pub trait Plugin {
+    fn name(&self) -> &'static str;
 
-#[derive(Debug)]
-pub enum PluginError {
-    Lua(mlua::Error),
-    Io(std::io::Error),
+    /// Called once when the plugin is registered.
+    fn register(&self, api: &mut PluginApi);
 }
 
-impl std::fmt::Display for PluginError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Lua(e) => write!(f, "Lua error: {e}"),
-            Self::Io(e) => write!(f, "I/O error: {e}"),
-        }
+/// Registration surface handed to [`Plugin::register`].
+#[derive(Default)]
+pub struct PluginApi {
+    keymap: HashMap<String, String>,
+    events: HashMap<String, Vec<Handler>>,
+}
+
+impl PluginApi {
+    /// Bind `chord` to the command called `command`.
+    pub fn bind_key(&mut self, chord: impl Into<String>, command: impl Into<String>) {
+        self.keymap.insert(chord.into(), command.into());
+    }
+
+    /// Run `handler` whenever `event` is fired.
+    pub fn on_event(&mut self, event: impl Into<String>, handler: impl Fn() + Send + Sync + 'static) {
+        self.events.entry(event.into()).or_default().push(Box::new(handler));
     }
 }
-impl std::error::Error for PluginError {}
 
-impl From<mlua::Error> for PluginError {
-    fn from(e: mlua::Error) -> Self { Self::Lua(e) }
-}
-impl From<std::io::Error> for PluginError {
-    fn from(e: std::io::Error) -> Self { Self::Io(e) }
-}
-
-// ─── PluginRuntime ───────────────────────────────────────────────────────────
-
-/// Lazily-initialised Lua 5.4 runtime for editor plugins.
-///
-/// The runtime is only created when `init_if_needed` is first called with
-/// at least one plugin path, keeping the startup budget intact.
+/// Holds registered plugins' keymaps and event handlers.
+#[derive(Default)]
 pub struct PluginRuntime {
-    /// `None` until the first plugin is loaded.
-    lua: OnceLock<Lua>,
-    api: LbApi,
+    api: PluginApi,
+    names: Vec<&'static str>,
 }
 
 impl PluginRuntime {
     pub fn new() -> Self {
-        Self {
-            lua: OnceLock::new(),
-            api: LbApi::new(),
-        }
+        Self::default()
     }
 
-    /// Initialise the Lua state (if not already done) and load all `paths`.
-    ///
-    /// Safe to call multiple times; new paths are loaded each call.
-    pub fn init_if_needed(&self, paths: &[&Path]) -> Result<(), PluginError> {
-        if paths.is_empty() {
-            return Ok(());
-        }
+    pub fn register(&mut self, plugin: &dyn Plugin) {
+        debug!(plugin = plugin.name(), "registering plugin");
+        plugin.register(&mut self.api);
+        self.names.push(plugin.name());
+    }
 
-        let lua = match self.lua.get() {
-            Some(lua) => lua,
-            None => {
-                debug!("initialising Lua 5.4 runtime");
-                let lua = sandbox::new_lua()?;
-                self.lua.get_or_init(|| lua)
+    /// Run all handlers registered for `event`.
+    pub fn fire_event(&self, event: &str) {
+        if let Some(handlers) = self.api.events.get(event) {
+            for handler in handlers {
+                handler();
             }
-        };
-
-        // Apply sandbox on first init.
-        // We track this by checking if `lb` global already exists.
-        let already_inited: bool = {
-            let v: mlua::Result<mlua::Value> = lua.globals().get("lb");
-            v.map(|v| !matches!(v, mlua::Value::Nil)).unwrap_or(false)
-        };
-
-        if !already_inited {
-            self.api.install(lua)?;
         }
-
-        for path in paths {
-            self.load_file(lua, path)?;
-        }
-
-        Ok(())
     }
 
-    /// Load and execute a single plugin file.
-    fn load_file(&self, lua: &Lua, path: &Path) -> Result<(), PluginError> {
-        debug!(path = %path.display(), "loading plugin");
-        let src = std::fs::read_to_string(path)?;
-        lua.load(&src)
-            .set_name(path.to_string_lossy().as_ref())
-            .exec()
-            .map_err(PluginError::Lua)?;
-        Ok(())
+    /// Command name bound to `chord` by a plugin, if any.
+    pub fn command_for(&self, chord: &str) -> Option<&str> {
+        self.api.keymap.get(chord).map(String::as_str)
     }
 
-    /// Fire a named event in all loaded plugins.
-    ///
-    /// Does nothing if the runtime has not been initialised.
-    pub fn fire_event(&self, event: &str) -> Result<(), PluginError> {
-        let lua = match self.lua.get() {
-            Some(l) => l,
-            None => return Ok(()),
-        };
-        self.api.fire_event(lua, event, &[]).map_err(PluginError::Lua)?;
-        Ok(())
-    }
-
-    /// Return `true` if the Lua runtime has been started.
     pub fn is_active(&self) -> bool {
-        self.lua.get().is_some()
-    }
-
-    /// Access the plugin API (for reading keymap overrides, etc.).
-    pub fn api(&self) -> &LbApi {
-        &self.api
-    }
-}
-
-impl Default for PluginRuntime {
-    fn default() -> Self {
-        Self::new()
+        !self.names.is_empty()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
-    #[test]
-    fn runtime_not_active_before_init() {
-        let rt = PluginRuntime::new();
-        assert!(!rt.is_active());
+    struct Demo(Arc<AtomicUsize>);
+
+    impl Plugin for Demo {
+        fn name(&self) -> &'static str {
+            "demo"
+        }
+
+        fn register(&self, api: &mut PluginApi) {
+            api.bind_key("ctrl-k", "my_command");
+            let hits = Arc::clone(&self.0);
+            api.on_event("on_load", move || {
+                hits.fetch_add(1, Ordering::SeqCst);
+            });
+        }
     }
 
     #[test]
-    fn fire_event_when_inactive_is_noop() {
-        let rt = PluginRuntime::new();
-        rt.fire_event("on_load").unwrap();
+    fn inactive_until_a_plugin_is_registered() {
+        let mut rt = PluginRuntime::new();
+        assert!(!rt.is_active());
+        rt.register(&Demo(Arc::default()));
+        assert!(rt.is_active());
     }
 
     #[test]
-    fn init_with_empty_paths_stays_inactive() {
-        let rt = PluginRuntime::new();
-        rt.init_if_needed(&[]).unwrap();
-        assert!(!rt.is_active());
+    fn fire_event_with_no_handlers_is_noop() {
+        PluginRuntime::new().fire_event("on_load");
+    }
+
+    #[test]
+    fn plugin_keymap_is_stored() {
+        let mut rt = PluginRuntime::new();
+        rt.register(&Demo(Arc::default()));
+        assert_eq!(rt.command_for("ctrl-k"), Some("my_command"));
+        assert_eq!(rt.command_for("ctrl-j"), None);
+    }
+
+    #[test]
+    fn event_handlers_run() {
+        let hits = Arc::new(AtomicUsize::new(0));
+        let mut rt = PluginRuntime::new();
+        rt.register(&Demo(Arc::clone(&hits)));
+        rt.fire_event("on_load");
+        rt.fire_event("on_load");
+        assert_eq!(hits.load(Ordering::SeqCst), 2);
     }
 }
